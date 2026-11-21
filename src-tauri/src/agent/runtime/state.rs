@@ -35,6 +35,7 @@ pub(super) struct AgentTurnState {
     emitter: AgentTurnEmitter,
     trace_committer: TraceCommitter,
     usage: Vec<Value>,
+    spent_usd: f64,
     pub(super) tools_used: Vec<String>,
     stop_reason: Option<AgentStopReason>,
     context_checkpoint: Option<AgentContextCheckpoint>,
@@ -63,6 +64,7 @@ impl AgentTurnState {
             ),
             trace_committer: TraceCommitter::new(&context.session_id, &context.turn_id, trace_sink),
             usage: Vec::new(),
+            spent_usd: 0.0,
             tools_used: Vec::new(),
             stop_reason: None,
             context_checkpoint: None,
@@ -526,6 +528,10 @@ impl AgentTurnState {
         Ok(Some(message))
     }
 
+    pub(super) fn spent_usd(&self) -> f64 {
+        self.spent_usd
+    }
+
     pub(super) fn record_usage(
         &mut self,
         context: &AgentTurnContext,
@@ -555,6 +561,9 @@ impl AgentTurnState {
             .get("contextWindowTokens")
             .and_then(Value::as_i64)
             .filter(|value| *value > 0);
+        if let Some(token_usage) = normalized_provider_usage.as_ref() {
+            self.spent_usd += call_cost_usd(&context.model, token_usage);
+        }
         let token_info = if let Some(token_usage) = normalized_provider_usage {
             self.history
                 .update_token_info(token_usage, model_context_window);
@@ -663,4 +672,24 @@ pub(super) fn current_user_message(history: &super::AgentItemHistory) -> Option<
         }
         Some(value)
     })
+}
+
+/// Dollar cost of one provider call from llm-budget's price table. Models it
+/// cannot price (local or custom endpoints) count as zero.
+pub(super) fn call_cost_usd(
+    model: &str,
+    usage: &crate::threads::rollout::format::TokenUsage,
+) -> f64 {
+    let tokens = |value: i64| u64::try_from(value).unwrap_or(0);
+    let table = llm_budget::PriceTable::builtin();
+    let input = tokens(usage.input_tokens);
+    let output = tokens(usage.output_tokens);
+    let cached = tokens(usage.cached_input_tokens).min(input);
+    table
+        .cost_usage(
+            model,
+            &llm_budget::Usage::new(input, output).with_cache_read(cached),
+        )
+        .or_else(|_| table.cost(model, input, output))
+        .unwrap_or(0.0)
 }

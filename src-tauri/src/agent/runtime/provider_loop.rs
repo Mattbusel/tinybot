@@ -1236,6 +1236,11 @@ impl<'a> NativeAgentTurnExecution<'a> {
             attempt.estimated_context_tokens,
             timing,
         )?;
+        if let Some(cap) = self.context.settings.max_cost_usd {
+            if self.state.spent_usd() >= cap {
+                return self.finish_max_cost(cap).map(IterationOutcome::Finished);
+            }
+        }
         if attempt.stream.streamed_content
             || !response.final_content.is_empty()
             || !response.response_items.is_empty()
@@ -1415,13 +1420,29 @@ impl<'a> NativeAgentTurnExecution<'a> {
 
     fn finish_max_iterations(&mut self) -> Result<AgentTurnResult, AgentError> {
         let error = "Rust agent runtime reached max iterations before final response.";
+        self.finish_limit(AgentStopReason::MaxIterations, error.to_string())
+    }
+
+    fn finish_max_cost(&mut self, cap: f64) -> Result<AgentTurnResult, AgentError> {
+        let error = format!(
+            "Rust agent runtime spent ${:.4} of its ${cap} max cost before final response.",
+            self.state.spent_usd()
+        );
+        self.finish_limit(AgentStopReason::MaxCost, error)
+    }
+
+    fn finish_limit(
+        &mut self,
+        stop_reason: AgentStopReason,
+        error: String,
+    ) -> Result<AgentTurnResult, AgentError> {
         self.state.set_stop_reason(
-            AgentStopReason::MaxIterations,
+            stop_reason,
             self.state.iteration,
             AgentEventKind::Error.wire_name(),
         )?;
         self.state.emit(TerminalEvent::Error(serde_json::json!({
-            "stopReason": "max_iterations",
+            "stopReason": stop_reason.as_str(),
             "error": error,
         })))?;
         self.dependencies
@@ -1432,13 +1453,9 @@ impl<'a> NativeAgentTurnExecution<'a> {
         let mut result = AgentTurnResult {
             tools_used: self.state.tools_used.clone(),
             completed_tool_results: Some(self.state.completed_tool_results.clone()),
-            error: Some(AgentResultError::Message(error.to_string())),
+            error: Some(AgentResultError::Message(error)),
             runtime_events: Some(runtime_events),
-            ..AgentTurnResult::new(
-                &self.context.turn_id,
-                &self.context.session_id,
-                AgentStopReason::MaxIterations,
-            )
+            ..AgentTurnResult::new(&self.context.turn_id, &self.context.session_id, stop_reason)
         };
         if let Some(context_checkpoint) = context_checkpoint {
             result.context_checkpoint = Some(context_checkpoint);

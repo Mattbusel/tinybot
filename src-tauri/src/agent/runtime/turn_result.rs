@@ -19,6 +19,7 @@ pub enum AgentStopReason {
     ToolRunning,
     AwaitingSubagent,
     MaxIterations,
+    MaxCost,
     InvalidRequest,
     ProviderRequestTimeout,
     ProviderStreamIdleTimeout,
@@ -70,6 +71,7 @@ impl AgentStopReason {
             Self::ToolRunning => "tool_running",
             Self::AwaitingSubagent => "awaiting_subagent",
             Self::MaxIterations => "max_iterations",
+            Self::MaxCost => "max_cost",
             Self::InvalidRequest => "invalid_request",
             Self::ProviderRequestTimeout => "provider_request_timeout",
             Self::ProviderStreamIdleTimeout => "provider_stream_idle_timeout",
@@ -98,6 +100,7 @@ impl AgentStopReason {
             | Self::ToolRunning
             | Self::AwaitingSubagent => AgentExecutionStatus::Waiting,
             Self::MaxIterations
+            | Self::MaxCost
             | Self::InvalidRequest
             | Self::ProviderRequestTimeout
             | Self::ProviderStreamIdleTimeout
@@ -127,6 +130,7 @@ impl AgentStopReason {
             | Self::Interrupted
             | Self::RuntimeRestarted
             | Self::MaxIterations
+            | Self::MaxCost
             | Self::InvalidRequest
             | Self::ProviderRequestTimeout
             | Self::ProviderStreamIdleTimeout
@@ -156,7 +160,7 @@ impl AgentStopReason {
             Self::AwaitingTool => AgentRuntimePhase::ToolRunning,
             Self::ToolRunning => AgentRuntimePhase::ToolRunning,
             Self::AwaitingSubagent => AgentRuntimePhase::AwaitingSubagent,
-            Self::MaxIterations => AgentRuntimePhase::Failed,
+            Self::MaxIterations | Self::MaxCost => AgentRuntimePhase::Failed,
             Self::InvalidRequest => AgentRuntimePhase::Failed,
             Self::ProviderRequestTimeout => AgentRuntimePhase::Failed,
             Self::ProviderStreamIdleTimeout => AgentRuntimePhase::Failed,

@@ -3336,6 +3336,75 @@ fn stops_with_max_iterations_after_bounded_tool_iterations() {
 }
 
 #[test]
+fn stops_with_max_cost_once_priced_spend_reaches_the_cap() {
+    struct PricedToolLoopProvider {
+        calls: Mutex<u32>,
+    }
+
+    impl BlockingTestProvider for PricedToolLoopProvider {
+        fn complete(
+            &self,
+            _context: &AgentTurnContext,
+        ) -> Result<NativeAgentProviderResponse, String> {
+            let mut calls = self
+                .calls
+                .lock()
+                .expect("calls lock should not be poisoned");
+            *calls += 1;
+            // 1M gpt-4o input tokens cost $2.50 per call.
+            Ok(NativeAgentProviderResponse {
+                final_content: String::new(),
+                reasoning_delta: None,
+                usage: Some(json!({
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 0,
+                    "total_tokens": 1_000_000
+                })),
+                response_items: Vec::new(),
+                tool_calls: vec![NativeAgentToolCall {
+                    id: format!("call-read-{calls}"),
+                    name: "workspace.read_file".to_string(),
+                    arguments_json: format!("{{\"path\":\"file-{calls}.md\"}}"),
+                    result: json!({ "content": "body" }),
+                }],
+            })
+        }
+    }
+
+    let provider = Arc::new(PricedToolLoopProvider {
+        calls: Mutex::new(0),
+    });
+    let services = NativeAgentRuntimeServices::new(
+        provider.clone(),
+        Arc::new(FakeNativeAgentToolDispatcher),
+        Arc::new(InMemoryNativeAgentCheckpointStore::default()),
+        Arc::new(InMemoryNativeAgentCancellation::default()),
+    )
+    .with_test_tool_registry_entries(test_registry_with_model_tools(&["workspace.read_file"]));
+
+    let result = run_native_agent_turn_with_services(
+        &services,
+        json!({
+            "runtime": "rust",
+            "turnId": "turn-max-cost",
+            "sessionId": "websocket:chat-max-cost",
+            "model": "gpt-4o",
+            "maxIterations": 10,
+            "maxCostUsd": 4.0,
+            "messages": [{ "role": "user", "content": "read forever" }]
+        }),
+    )
+    .expect("max cost run should return a structured result");
+
+    assert_eq!(*provider.calls.lock().unwrap(), 2);
+    assert_eq!(result["stopReason"], "max_cost");
+    assert_eq!(
+        result["runtimeEvents"].as_array().unwrap().last().unwrap()["payload"]["stopReason"],
+        "max_cost"
+    );
+}
+
+#[test]
 fn denied_tool_is_returned_to_the_model_without_tool_dispatch() {
     let result = run_native_agent_turn_with_config(
         &NativeAgentRuntimeServices::default(),

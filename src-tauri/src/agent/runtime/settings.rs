@@ -43,6 +43,7 @@ pub struct AgentTurnSettings {
     pub stream: bool,
     pub temperature: Option<f64>,
     pub max_completion_tokens: Option<u64>,
+    pub max_cost_usd: Option<f64>,
     pub context_window_strategy: ContextWindowStrategy,
     pub reasoning: Option<AgentReasoningSettings>,
     pub service_tier: Option<String>,
@@ -99,6 +100,16 @@ impl AgentTurnSettings {
                 "max_tokens",
             ],
             "max_completion_tokens",
+            &mut validation_errors,
+        );
+        let max_cost_usd = optional_f64_setting(
+            spec,
+            metadata,
+            defaults,
+            &["maxCostUsd", "max_cost_usd"],
+            "max_cost_usd",
+            0.0,
+            f64::MAX,
             &mut validation_errors,
         );
         let context_window_strategy = optional_string_setting(
@@ -185,6 +196,7 @@ impl AgentTurnSettings {
             stream,
             temperature,
             max_completion_tokens,
+            max_cost_usd,
             context_window_strategy,
             reasoning,
             service_tier,
